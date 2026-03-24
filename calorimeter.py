@@ -16,13 +16,13 @@ class CaloBlock:
         self.N_cells = self.N_cells_x * self.N_cells_y * self.N_cells_z
         self.N_spots_per_layer = config.get('N_spots_per_layer', 1000)
 
-        if device is None:
-            self.get_device()
-
+        self.get_device(device)
         self.initialize_cells()
 
-    def get_device(self):
-        if torch.cuda.is_available():
+    def get_device(self, device=None):
+        if device is not None:
+            self.device = device
+        elif torch.cuda.is_available():
             print("Using CUDA")
             self.device = torch.device('cuda')
         else:
@@ -39,7 +39,7 @@ class CaloBlock:
         self.cell_z_edges = torch.linspace(0, self.depth, self.N_cells_z + 1, device=self.device)
 
     def simulate(self, particle_Es: torch.Tensor, particle_xs: torch.Tensor, particle_ys: torch.Tensor,
-                 store_truth=True, N_spots_per_layer=None):
+                 return_grid=True, return_point_cloud=True, return_truth=True, N_spots_per_layer=None):
 
         ### Auto-unsqueeze (N_particles,) -> (1, N_particles)
         if particle_Es.dim() == 1:
@@ -99,37 +99,68 @@ class CaloBlock:
         ### Global index in (N_events x N_cells) flattened tensor
         global_cell_idx = event_m * self.N_cells + cell_idx
 
-        ### Deposit energy into (N_events, N_cells_x, N_cells_y, N_cells_z)
-        flat_e = torch.zeros(N_events * self.N_cells, device=self.device)
-        flat_e.scatter_add_(0, global_cell_idx, e_m)
-        flat_e = flat_e.reshape(N_events, self.N_cells_x, self.N_cells_y, self.N_cells_z)
+        ### Aggregate energy into (N_events, N_cells)
+        flat_cell_e = torch.zeros(N_events * self.N_cells, device=self.device)
+        flat_cell_e.scatter_add_(0, global_cell_idx, e_m)
 
-        ### remove event dimension for single-event case
-        if N_events == 1:
-            flat_e = flat_e[0]
+        grid_dict = {}
+        if return_grid:
+            ### Arrange energy deposits into grid (events, cells_x, cells_y, cells_z)
+            grid_e = flat_cell_e.reshape(N_events, self.N_cells_x, self.N_cells_y, self.N_cells_z)
 
-        if not store_truth:
-            ### Save some time
-            return flat_e
+            ### remove event dimension for single-event case
+            if N_events == 1: grid_e = grid_e[0]
 
-        ### Truth record: unique key for (event, cell, particle)
-        combined_idx = global_cell_idx * N_particles + particle_m
-        wgt_dense = torch.zeros(N_events * self.N_cells * N_particles, device=self.device)
-        wgt_dense.scatter_add_(0, combined_idx, e_m)
-        nonzero = wgt_dense.nonzero(as_tuple=True)[0]
+            grid_dict['grid_e'] = grid_e
 
-        ### Invert combined index
-        event_cell = nonzero // N_particles
-        cell_event_src    = (event_cell // self.N_cells).tolist()
-        cell_particle_src = (event_cell  % self.N_cells).tolist()
-        cell_particle_dst = (nonzero     % N_particles).tolist()
-        cell_particle_wgt = wgt_dense[nonzero].tolist()
+        point_dict = {}
+        if return_point_cloud:
 
-        truth = {
-            'cell_event_src': cell_event_src,
-            'cell_particle_src': cell_particle_src,
-            'cell_particle_dst': cell_particle_dst,
-            'cell_particle_wgt': cell_particle_wgt
-        }
+            active_cell_idx = flat_cell_e.nonzero(as_tuple=True)[0]
+            hit_event = active_cell_idx // self.N_cells
+            hit_cell  = active_cell_idx  % self.N_cells
 
-        return flat_e, truth
+            ### Convert global -> local cell index
+            hit_ix =  hit_cell // (self.N_cells_y * self.N_cells_z)
+            hit_iy = (hit_cell  % (self.N_cells_y * self.N_cells_z)) // self.N_cells_z
+            hit_iz =  hit_cell  %  self.N_cells_z
+
+            ### Compute corresponding cell centers
+            hit_x = self.cell_x_edges[0] + (hit_ix + 0.5) * self.cell_size_x
+            hit_y = self.cell_y_edges[0] + (hit_iy + 0.5) * self.cell_size_y
+            hit_z = self.cell_z_edges[0] + (hit_iz + 0.5) * self.cell_size_z
+            hit_e = flat_cell_e[active_cell_idx]
+
+            point_dict = {
+                'event_idx': hit_event,
+                'cell_x': hit_x,
+                'cell_y': hit_y,
+                'cell_z': hit_z,
+                'cell_e': hit_e
+            }
+
+        truth_dict = {}
+        if return_truth:
+
+            ### Truth record: unique key for (event, cell, particle)
+            combined_idx = global_cell_idx * N_particles + particle_m
+            wgt_dense = torch.zeros(N_events * self.N_cells * N_particles, device=self.device)
+            wgt_dense.scatter_add_(0, combined_idx, e_m)
+            nonzero = wgt_dense.nonzero(as_tuple=True)[0]
+
+            ### Invert combined index
+            event_idx         = (nonzero // N_particles) // self.N_cells
+            cell_particle_src = (nonzero // N_particles)  % self.N_cells
+            cell_particle_dst =  nonzero                  % N_particles
+            cell_particle_wgt = wgt_dense[nonzero]
+
+            truth_dict = {
+                'truth_event_idx':         event_idx,
+                'truth_cell_particle_src': cell_particle_src,
+                'truth_cell_particle_dst': cell_particle_dst,
+                'truth_cell_particle_e':   cell_particle_wgt
+            }
+
+        return {**grid_dict, 
+                **point_dict, 
+                **truth_dict}
