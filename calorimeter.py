@@ -15,6 +15,7 @@ class CaloBlock:
         self.N_cells_z = config['N_cells_z']
         self.N_cells = self.N_cells_x * self.N_cells_y * self.N_cells_z
         self.N_spots_per_layer = config.get('N_spots_per_layer', 1000)
+        self.e_threshold = config.get('e_threshold', 0.0)
 
         self.get_device(device)
         self.initialize_cells()
@@ -102,6 +103,10 @@ class CaloBlock:
         ### Aggregate energy into (N_events, N_cells)
         flat_cell_e = torch.zeros(N_events * self.N_cells, device=self.device)
         flat_cell_e.scatter_add_(0, global_cell_idx, e_m)
+
+        ### Zero out cells below detection threshold
+        if self.e_threshold > 0:
+            flat_cell_e[flat_cell_e < self.e_threshold] = 0.0
 
         grid_dict = {}
         if return_grid:

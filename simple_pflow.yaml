@@ -1,0 +1,13 @@
+calorimeter:
+  Z: 82               # Atomic number (lead)
+  width: 10.0         # Transverse width [X0] (also sets height)
+  depth: 10.0         # Longitudinal depth [X0]
+  N_cells_x: 64       # Transverse cells in x (also sets N_cells_y)
+  N_cells_z: 8        # Longitudinal layers
+  N_spots_per_layer: 1000
+
+generator:
+  x_range: [-4.0, 4.0]   # 80% of half-width [X0]
+  y_range: [-4.0, 4.0]
+  E_range: [1000, 100000] # Particle energy [MeV]
+  N_range: [1, 32]        # Number of particles per event
