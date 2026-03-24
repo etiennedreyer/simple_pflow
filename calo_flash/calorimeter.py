@@ -38,45 +38,49 @@ class CaloBlock:
         self.cell_x_edges = torch.linspace(-self.width/2, self.width/2, self.N_cells_x + 1, device=self.device)
         self.cell_y_edges = torch.linspace(-self.height/2, self.height/2, self.N_cells_y + 1, device=self.device)
         self.cell_z_edges = torch.linspace(0, self.depth, self.N_cells_z + 1, device=self.device)
-        self.cell_e = torch.zeros(self.N_cells_x, self.N_cells_y, self.N_cells_z, device=self.device)
 
-        ### For storing flattened truth record
-        self.cell_particle_src = []
-        self.cell_particle_dst = []
-        self.cell_particle_wgt = []
-    
-    def clear(self):
-        self.cell_e.zero_()
-        self.cell_particle_src.clear()
-        self.cell_particle_dst.clear()
-        self.cell_particle_wgt.clear()
-
-    def simulate(self, particle_Es: torch.Tensor, particle_xs: torch.Tensor, particle_ys: torch.Tensor, 
+    def simulate(self, particle_Es: torch.Tensor, particle_xs: torch.Tensor, particle_ys: torch.Tensor,
                  store_truth=True, N_spots_per_layer=None):
 
-        ### Shape
-        N_particles = len(particle_Es)
-        assert particle_Es.shape == particle_xs.shape == particle_ys.shape == (N_particles,), \
-            "Input tensors must have shape (N_particles,)"
+        ### Auto-unsqueeze (N_particles,) -> (1, N_particles)
+        if particle_Es.dim() == 1:
+            particle_Es = particle_Es.unsqueeze(0)
+            particle_xs = particle_xs.unsqueeze(0)
+            particle_ys = particle_ys.unsqueeze(0)
+
+        ### Shapes
+        N_events, N_particles = particle_Es.shape
+        self.max_particles = N_particles
 
         ### Move to device
         particle_Es = particle_Es.to(device=self.device, dtype=torch.float32)
         particle_xs = particle_xs.to(device=self.device, dtype=torch.float32)
         particle_ys = particle_ys.to(device=self.device, dtype=torch.float32)
 
-        ### Empty calo and truth
-        self.clear()
+        ### Flatten: (N_events, N_particles) -> (N_events * N_particles,)
+        flat_Es = particle_Es.reshape(-1)
+        flat_xs = particle_xs.reshape(-1)
+        flat_ys = particle_ys.reshape(-1)
 
-        ### Calo Flash simulation
+        ### Mask out padded (E == 0) particles
+        valid_mask    = flat_Es > 0
+        valid_Es      = flat_Es[valid_mask]
+        orig_flat_idx = valid_mask.nonzero(as_tuple=True)[0]  # indices into flat_Es
+
+        ### Calo Flash simulation (only valid particles)
         if N_spots_per_layer is None:
             N_spots_per_layer = self.N_spots_per_layer
-        spots = shoot(particle_Es, self.Z, self.cell_z_edges,
-                        N_spots_per_layer=N_spots_per_layer)
+        spots = shoot(valid_Es, self.Z, self.cell_z_edges, N_spots_per_layer=N_spots_per_layer)
+
+        ### Map spot particle index -> flat global index -> (event, local particle)
+        local_pidx   = spots['particle_idx'].long()
+        flat_pidx    = orig_flat_idx[local_pidx]          # index into flat_Es
+        event_idx    = flat_pidx // N_particles
+        particle_idx = flat_pidx  % N_particles
 
         ### Convert to Cartesian
-        pidx = spots['particle_idx'].long()
-        x = spots['r'] * torch.cos(spots['phi']) + particle_xs[pidx]
-        y = spots['r'] * torch.sin(spots['phi']) + particle_ys[pidx]
+        x = spots['r'] * torch.cos(spots['phi']) + flat_xs[flat_pidx]
+        y = spots['r'] * torch.sin(spots['phi']) + flat_ys[flat_pidx]
         z = spots['t']
         e = spots['E']
 
@@ -84,40 +88,52 @@ class CaloBlock:
         mask = (x >= -self.width/2)  & (x < self.width/2) & \
                (y >= -self.height/2) & (y < self.height/2) & \
                (z >= 0)              & (z < self.depth)
-        x_m, y_m, z_m, e_m, pidx_m = x[mask], y[mask], z[mask], e[mask], pidx[mask]
+        x_m, y_m, z_m, e_m = x[mask], y[mask], z[mask], e[mask]
+        event_m, particle_m = event_idx[mask], particle_idx[mask]
 
-        ### Assign local index to each spot based on nearest cell edge
-        ### (assumes uniform grid and positive x_m - cell_x_edges[0])
+        ### Cell indices (floor-division on uniform grid)
         ix = ((x_m - self.cell_x_edges[0]) / self.cell_size_x).long().clamp(0, self.N_cells_x - 1)
         iy = ((y_m - self.cell_y_edges[0]) / self.cell_size_y).long().clamp(0, self.N_cells_y - 1)
         iz = ((z_m - self.cell_z_edges[0]) / self.cell_size_z).long().clamp(0, self.N_cells_z - 1)
-
-        ### Global cell index for flattened array
         cell_idx = ix * (self.N_cells_y * self.N_cells_z) + iy * self.N_cells_z + iz
 
-        ### Deposit energy
-        flat_e = torch.zeros(self.N_cells, device=self.device)
-        flat_e.scatter_add_(0, cell_idx, e_m)
-        self.cell_e = flat_e.reshape(self.N_cells_x, self.N_cells_y, self.N_cells_z)
+        ### Global index in (N_events x N_cells) flattened tensor
+        global_cell_idx = event_m * self.N_cells + cell_idx
+
+        ### Deposit energy into (N_events, N_cells_x, N_cells_y, N_cells_z)
+        flat_e = torch.zeros(N_events * self.N_cells, device=self.device)
+        flat_e.scatter_add_(0, global_cell_idx, e_m)
+        flat_e = flat_e.reshape(N_events, self.N_cells_x, self.N_cells_y, self.N_cells_z)
+
+        ### remove event dimension for single-event case
+        if N_events == 1:
+            flat_e = flat_e[0]
 
         if not store_truth:
             ### Save some time
-            return
+            return flat_e
 
-        ### Truth record ###
-
-        ### unique key for (cell, particle) pair
-        combined_idx = cell_idx * N_particles + pidx_m
-
-        ### Sum energy for each (cell, particle) pair
-        wgt_dense = torch.zeros(self.N_cells * N_particles, device=self.device)
+        ### Truth record: unique key for (event, cell, particle)
+        combined_idx = global_cell_idx * N_particles + particle_m
+        wgt_dense = torch.zeros(N_events * self.N_cells * N_particles, device=self.device)
         wgt_dense.scatter_add_(0, combined_idx, e_m)
         nonzero = wgt_dense.nonzero(as_tuple=True)[0]
 
         ### Invert combined index
-        self.cell_particle_src = (nonzero // N_particles).tolist()
-        self.cell_particle_dst = (nonzero  % N_particles).tolist()
-        self.cell_particle_wgt = wgt_dense[nonzero].tolist()
+        event_cell = nonzero // N_particles
+        cell_event_src    = (event_cell // self.N_cells).tolist()
+        cell_particle_src = (event_cell  % self.N_cells).tolist()
+        cell_particle_dst = (nonzero     % N_particles).tolist()
+        cell_particle_wgt = wgt_dense[nonzero].tolist()
+
+        truth = {
+            'cell_event_src': cell_event_src,
+            'cell_particle_src': cell_particle_src,
+            'cell_particle_dst': cell_particle_dst,
+            'cell_particle_wgt': cell_particle_wgt
+        }
+
+        return flat_e, truth
 
 class EventGenerator:
 
@@ -127,17 +143,26 @@ class EventGenerator:
         self.E_min, self.E_max = config['E_range']
         self.N_min, self.N_max = config['N_range']
 
-    def generate(self):
+    def generate(self, N_events=1):
 
-        N_particles = torch.randint(self.N_min, self.N_max + 1, (1,)).item()
+        N_particles = torch.randint(self.N_min, self.N_max + 1, (N_events,)).tolist()
+
+        N_pad = max(N_particles)
 
         ### Uniform spread in x/y
-        particle_xs = torch.rand(N_particles) * (self.x_max - self.x_min) + self.x_min
-        particle_ys = torch.rand(N_particles) * (self.y_max - self.y_min) + self.y_min
+        particle_xs = torch.rand((N_events, N_pad)) * (self.x_max - self.x_min) + self.x_min
+        particle_ys = torch.rand((N_events, N_pad)) * (self.y_max - self.y_min) + self.y_min
 
         ### Power-law spectrum in energy
         alpha = 2.0
-        r = torch.rand(N_particles)
+        r = torch.rand((N_events, N_pad))
         particle_Es = ((self.E_max**(1-alpha) - self.E_min**(1-alpha)) * r + self.E_min**(1-alpha))**(1/(1-alpha))
+
+        if N_events == 1:
+            return particle_Es[0], particle_xs[0], particle_ys[0]
+
+        ### Mask out padded particles, vectorized
+        for i, N in enumerate(N_particles):
+            particle_Es[i, N:] = 0.0  # zero energy means "no particle"
 
         return particle_Es, particle_xs, particle_ys
