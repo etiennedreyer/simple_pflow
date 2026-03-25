@@ -2,10 +2,10 @@ calorimeter:
   Z: 82                   # Atomic number (lead)
   width: 10.0             # Transverse width [X0] (also sets height)
   depth: 16.0             # Longitudinal depth [X0]
-  N_cells_x: 64           # Transverse cells in x (also sets N_cells_y)
+  N_cells_x: 32           # Transverse cells in x (also sets N_cells_y)
   N_cells_z: 8            # Longitudinal layers
   N_spots_per_layer: 1000 # Number spots to sample
-  cell_e_threshold: 25.0       # Cell energy threshold [MeV]
+  cell_e_threshold: 25.0  # Cell energy threshold [MeV]
 
 generator:
   x_range: [-4.0, 4.0]    # 80% of half-width [X0]
@@ -35,12 +35,12 @@ transforms:
   hit_e:
     type: log
     norm: 1.0
-    shift: 0.0
+    shift: -3.2
     offset: 0.0
   part_e:
     type: log
     norm: 1.0
-    shift: 0.0
+    shift: -6.9
     offset: 0.0
   part_x:
     type: minmax_sym
