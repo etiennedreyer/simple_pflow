@@ -36,7 +36,7 @@ class EventGenerator:
 
         if N_events > 1:
             ### Assign pad_value to padded particles
-            index = torch.arange(N_pad).unsqueeze(0)  # (1, N_pad)
+            index = torch.arange(N_pad, device=self.device).unsqueeze(0)  # (1, N_pad)
             mask = index >= N_particles.unsqueeze(1)  # (N_events, N_pad)
             particle_Es[mask] = self.pad_value
             particle_xs[mask] = self.pad_value
