@@ -6,6 +6,7 @@ class CaloBlock:
     ### Homogeneous calorimeter block with cells on Cartesian grid
 
     def __init__(self, config, device=None):
+        self.config = config
         self.Z = config['Z']
         self.width = config['width']
         self.height = config.get('height', self.width)
@@ -17,17 +18,16 @@ class CaloBlock:
         self.N_spots_per_layer = config.get('N_spots_per_layer', 1000)
         self.cell_e_threshold = config.get('cell_e_threshold', 0.0)
 
-        self.get_device(device)
+        self.set_device(device)
         self.initialize_cells()
 
-    def get_device(self, device=None):
-        if device is not None:
-            self.device = device
-        elif torch.cuda.is_available():
-            print("Using CUDA")
-            self.device = torch.device('cuda')
+    def set_device(self, device):
+        if device is None:
+            self.device = self.config.get('device', 'cpu')
         else:
-            self.device = torch.device('cpu')
+            self.device = device
+        if isinstance(self.device, str):
+            self.device = torch.device(self.device)
     
     def initialize_cells(self):
         self.cell_size_x = self.width / self.N_cells_x
@@ -73,10 +73,11 @@ class CaloBlock:
         ### Shapes (Note: N_particles = maximum across batch)
         N_events, N_particles = particle_Es.shape
 
-        ### Move to device
-        particle_Es = particle_Es.to(device=self.device, dtype=torch.float32)
-        particle_xs = particle_xs.to(device=self.device, dtype=torch.float32)
-        particle_ys = particle_ys.to(device=self.device, dtype=torch.float32)
+        if particle_Es.device != self.device:
+            ### Move to device
+            particle_Es = particle_Es.to(device=self.device, dtype=torch.float32)
+            particle_xs = particle_xs.to(device=self.device, dtype=torch.float32)
+            particle_ys = particle_ys.to(device=self.device, dtype=torch.float32)
 
         ### Flatten: (N_events, N_particles) -> (N_events * N_particles,)
         flat_Es = particle_Es.reshape(-1)
