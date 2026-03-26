@@ -29,33 +29,15 @@ def transform(x, var, cfg, inverse=False):
 
     return transform_funcs[key](x, cfg[var])
 
-def unflatten(flat: torch.Tensor, idx_0: torch.Tensor, 
-              idx_1=None, max_len=None):
-    B = idx_0.max().item() + 1
-    d = flat.device
+def get_max_N_safe(indices, N_max=None):
 
-    if idx_1 is None:
-        ### Count entries in each event
-        counts = torch.bincount(idx_0, minlength=B) # (B,)
-
-        ### Create index for dim=1
-        cumsum = counts.cumsum(dim=0) # (B,)
-        offsets = cumsum - counts
-        idx_1 = torch.arange(len(flat), device=d) - offsets[idx_0] # (N,)
-
-    ### Compute max length for padding
-    max_len_batch = idx_1.max().item() + 1
-    if max_len is None:
-        max_len = max_len_batch
-    else:
-        assert max_len >= max_len_batch, \
-            f"max_len in batch ({max_len_batch}) > max_len argument ({max_len})"
-
-    ### Placeholder for output
-    unflat = torch.full((B, max_len), float('nan'), 
-                        dtype=flat.dtype, device=d) # (B, max_len)
-
-    ### Scatter into unflat tensor
-    unflat[idx_0, idx_1] = flat
-
-    return unflat, idx_1
+    '''
+    Checks whether external maximum is suffiently big if provided
+    Otherwise returns maximum index + 1
+    '''
+    N_max_indices = indices.max().item() + 1
+    if N_max is not None:
+        assert N_max >= N_max_indices, \
+            f"max number in batch ({N_max_indices}) > N_max argument ({N_max})"
+        return N_max
+    return N_max_indices
