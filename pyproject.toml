@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "torch_calo_flash"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "torch",
+    "scipy",
+    "numpy",
+    "pyyaml",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = [
+    "calo_flash",
+    "calorimeter",
+    "generator",
+    "dataset",
+    "utils",
+]

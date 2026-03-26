@@ -1,0 +1,53 @@
+calorimeter:
+  Z: 82                   # Atomic number (lead)
+  width: 10.0             # Transverse width [X0] (also sets height)
+  depth: 16.0             # Longitudinal depth [X0]
+  N_cells_x: 32           # Transverse cells in x (also sets N_cells_y)
+  N_cells_z: 8            # Longitudinal layers
+  N_spots_per_layer: 1000 # Number spots to sample
+  cell_e_threshold: 25.0  # Cell energy threshold [MeV]
+
+generator:
+  x_range: [-4.0, 4.0]    # 80% of half-width [X0]
+  y_range: [-4.0, 4.0]
+  E_range: [1000, 100000] # Particle energy [MeV]
+  N_range: [4, 32]        # Number of particles per event
+  power: 2.0              # Power-law index for energy spectrum
+  pad_value: nan          # Value to use for padding particles
+
+transforms:
+  hit_E:
+    type: log
+    norm: 1000.0
+    shift: 1.0
+    offset: 1.0e-3
+  hit_x:
+    type: minmax_sym
+    min: -5.0
+    max: 5.0
+  hit_y:
+    type: minmax_sym
+    min: -5.0
+    max: 5.0
+  hit_z:
+    type: minmax
+    min: 0.0
+    max: 16.0
+  hit_e:
+    type: log
+    norm: 1.0
+    shift: -3.2
+    offset: 0.0
+  part_e:
+    type: log
+    norm: 1.0
+    shift: -6.9
+    offset: 0.0
+  part_x:
+    type: minmax_sym
+    min: -5.0
+    max: 5.0
+  part_y:
+    type: minmax_sym
+    min: -5.0
+    max: 5.0
