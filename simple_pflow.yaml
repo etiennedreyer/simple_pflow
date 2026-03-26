@@ -13,6 +13,7 @@ generator:
   E_range: [1000, 100000] # Particle energy [MeV]
   N_range: [4, 32]        # Number of particles per event
   power: 2.0              # Power-law index for energy spectrum
+  pad_value: nan          # Value to use for padding particles
 
 transforms:
   hit_E:

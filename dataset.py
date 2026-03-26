@@ -19,7 +19,7 @@ class SimplePflowDataset(IterableDataset):
         self.gen_cfg = cfg['generator']
         self.calo_cfg = cfg['calorimeter']
         self.xform_cfg = cfg['transforms']
-        self.max_particles = cfg.get('max_particles', None)
+        self.max_particles = self.gen_cfg['N_range'][1]
         self.batch_size = batch_size
         if self.batch_size is None:
             self.batch_size = cfg.get('batch_size', 1)
@@ -98,8 +98,14 @@ class SimplePflowDataset(IterableDataset):
                 'part_y': p_y
             }
 
-            ### NaN-pad target features
-            target_mask = (p_E == 0) | (part_dep_E == 0)
+            ### NaN-pad particles to max_particles
+            how_much = self.max_particles - p_E.shape[1]
+            if how_much > 0:
+                nans = torch.full((p_E.shape[0], how_much), float('nan'), device=p_E.device)
+                target_feats = {k: torch.cat([v, nans], dim=1) for k, v in target_feats.items()}
+
+            ### NaN-pad particles with no deposited E
+            target_mask = (part_dep_E == 0)
             for k, v in target_feats.items():
                 v[target_mask] = float('nan')
 

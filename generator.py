@@ -8,6 +8,7 @@ class EventGenerator:
         self.E_min, self.E_max = config['E_range']
         self.N_min, self.N_max = config['N_range']
         self.power = config.get('power', 2.0)
+        self.pad_value = float(config.get('pad_value', 'nan'))
 
     def generate(self, N_events=1):
 
@@ -24,9 +25,11 @@ class EventGenerator:
         particle_Es = ((self.E_max**(1-self.power) - self.E_min**(1-self.power)) * r + self.E_min**(1-self.power))**(1/(1-self.power))
 
         if N_events > 1:
-            ### Assign E=0 to padded particles
+            ### Assign pad_value to padded particles
             index = torch.arange(N_pad).unsqueeze(0)  # (1, N_pad)
             mask = index >= N_particles.unsqueeze(1)   # (N_events, N_pad)
-            particle_Es[mask] = 0.0
+            particle_Es[mask] = self.pad_value
+            particle_xs[mask] = self.pad_value
+            particle_ys[mask] = self.pad_value
 
         return particle_Es, particle_xs, particle_ys

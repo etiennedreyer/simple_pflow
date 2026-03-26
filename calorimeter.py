@@ -83,16 +83,16 @@ class CaloBlock:
         flat_xs = particle_xs.reshape(-1)
         flat_ys = particle_ys.reshape(-1)
 
-        ### Mask out padded (E == 0) particles
-        nonzero_part_idx = torch.where(flat_Es > 0)[0]
+        ### Mask out padded (E == 'nan') particles
+        real_part_idx = torch.where(flat_Es == flat_Es)[0]
 
         ### Calo Flash simulation (only valid particles)
-        ### output values have shape (len(nonzero_part_idx) * N_cells_z * N_spots_per_layer,)
-        spot_dict = shoot(flat_Es[nonzero_part_idx], self.Z, 
+        ### output values have shape (len(real_part_idx) * N_cells_z * N_spots_per_layer,)
+        spot_dict = shoot(flat_Es[real_part_idx], self.Z, 
                       self.cell_z_edges, N_spots_per_layer=N_spots_per_layer)
 
-        ### Map part idx on nonzero particles back to global part idx
-        spot_global_part_idx  = nonzero_part_idx[spot_dict['particle_idx']]
+        ### Map particle idx on real particles back to global particle idx
+        spot_global_part_idx  = real_part_idx[spot_dict['particle_idx']]
         spot_event_idx        = spot_global_part_idx // N_particles
         spot_local_part_idx   = spot_global_part_idx  % N_particles
 
