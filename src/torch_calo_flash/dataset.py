@@ -1,8 +1,8 @@
 import torch
 from torch.utils.data import IterableDataset, get_worker_info
-from calorimeter import CaloBlock
-from generator import EventGenerator
-from utils import transform, get_max_N_safe
+from .calorimeter import CaloBlock
+from .generator import EventGenerator
+from .utils import transform, get_max_N_safe
 import yaml
 
 

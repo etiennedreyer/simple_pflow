@@ -15,10 +15,4 @@ dependencies = [
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-py-modules = [
-    "calo_flash",
-    "calorimeter",
-    "generator",
-    "dataset",
-    "utils",
-]
+packages = ["torch_calo_flash"]

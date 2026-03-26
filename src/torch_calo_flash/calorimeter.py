@@ -1,5 +1,5 @@
 import torch
-from calo_flash import shoot
+from .calo_flash import shoot
 
 class CaloBlock:
 
