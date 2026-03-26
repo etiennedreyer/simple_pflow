@@ -8,7 +8,7 @@ import yaml
 
 class SimplePflowDataset(IterableDataset):
     
-    def __init__(self, cfg, batch_size=1, device=None):
+    def __init__(self, cfg, batch_size=None, device=None):
         super().__init__()
 
         if isinstance(cfg, str):
@@ -21,6 +21,8 @@ class SimplePflowDataset(IterableDataset):
         self.xform_cfg = cfg['transforms']
         self.max_particles = cfg.get('max_particles', None)
         self.batch_size = batch_size
+        if self.batch_size is None:
+            self.batch_size = cfg.get('batch_size', 1)
         self.device = device if device is not None else torch.device('cpu')
 
     @staticmethod
