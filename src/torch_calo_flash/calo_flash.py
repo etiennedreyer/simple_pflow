@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 from jax import random
 import numpy as np
-from scipy.stats import gamma as gamma_dist
+from functools import partial
 
 ### Python implementation of https://arxiv.org/pdf/hep-ex/0001020
 
@@ -211,12 +211,22 @@ def get_num_spots_layer(t_lo, t_hi, alpha, T, Z, N_total=None, E=None):
     return N_layer
 
 
+@partial(jax.jit, static_argnames=['Z', 'N_spots_per_layer', 'flatten'])
 def shoot(Es: jax.Array, Z: int, t_edges: jax.Array, 
-          seed: int = 0, N_spots_per_layer=None, flatten=True):
+          seed: int = 0, N_spots_per_layer=None, flatten=True, pad_value=0.0):
+
+    '''
+    Simulate a shower for batch of incoming particles with energies Es [MeV]
+    '''
 
     assert len(t_edges) >= 2, "t_edges must have at least 2 edges"
 
     N_layers = len(t_edges) - 1
+
+    ### Deal with padded particles (will set to 0 later)
+    E_mask = Es == pad_value
+    E_low = 10.0
+    Es = jnp.where(E_mask, E_low, Es)
 
     ### Longitudinal parameters: each (N_particles,)
     long_params = get_longitudinal_parameters(Es, Z)
@@ -253,6 +263,10 @@ def shoot(Es: jax.Array, Z: int, t_edges: jax.Array,
     spot_E          = jnp.broadcast_to((dE / N_spots_per_layer)[:, :, None], r.shape)
     t_mid_bc        = jnp.broadcast_to(t_mid[None, :, None], r.shape)
     particle_idx_bc = jnp.broadcast_to(jnp.arange(len(Es), dtype=jnp.int32)[:, None, None], r.shape)
+
+    ### Re-apply mask
+    E_mask = E_mask[:, None, None]
+    spot_E = jnp.where(E_mask, 0.0, spot_E)
 
     ### Results
     out_dict = {
