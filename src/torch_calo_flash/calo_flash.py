@@ -1,4 +1,6 @@
-import torch
+import jax
+import jax.numpy as jnp
+from jax import random
 import numpy as np
 from scipy.stats import gamma as gamma_dist
 
@@ -23,11 +25,10 @@ critical_energy = {
 
 ### Eq (2)
 def longitudinal_pdf(t, alpha, beta):
-    return gamma_dist.pdf(t, alpha.cpu(), scale=1/beta.cpu())
+    return jax.scipy.stats.gamma.pdf(t, alpha, scale=1/beta)
 
 def longitudinal_cdf(t, alpha, beta):
-    x = beta * t
-    return torch.special.gammainc(alpha, x)
+    return jax.scipy.stats.gamma.cdf(t, alpha, scale=1/beta)
 
 ### Eq (4)
 def get_beta(alpha, T):
@@ -37,17 +38,17 @@ def get_beta(alpha, T):
 def get_T(y, 
           t_1=0.858):
 
-    return torch.log(y) - t_1
+    return jnp.log(y) - t_1
 
 ### Eq (8) -- default yields mean value (A.1.1)
 def get_alpha(y, Z, 
               a_1=0.21, 
               a_2=0.492, 
               a_3=2.38):
-    return a_1 + (a_2 + a_3/Z) * torch.log(y)
+    return a_1 + (a_2 + a_3/Z) * jnp.log(y)
 
 ### Putting it all together (longitudinal)
-def get_longitudinal_parameters(E: torch.Tensor, Z: int):
+def get_longitudinal_parameters(E: jax.Array, Z: int, seed: int = 0):
 
     y = E / critical_energy[Z]
 
@@ -58,30 +59,31 @@ def get_longitudinal_parameters(E: torch.Tensor, Z: int):
 
     ### Eq (9)
     def get_sigma(y, s1, s2):
-        return 1 / (s1 + s2*torch.log(y))
+        return 1 / (s1 + s2*jnp.log(y))
 
     ### Eq (10)
     def get_rho(y, r1, r2):
-        return r1 + r2*torch.log(y)
+        return r1 + r2*jnp.log(y)
 
     ### A.1.2
-    mean_ln_T         = torch.log(get_T(y, t_1=0.812))
+    mean_ln_T         = jnp.log(get_T(y, t_1=0.812))
     sigma_ln_T        = get_sigma(y, s1=-1.4, s2=1.26)
-    mean_ln_alpha     = torch.log(get_alpha(y, Z, a_1=0.81, a_2=0.458, a_3=2.26))
+    mean_ln_alpha     = jnp.log(get_alpha(y, Z, a_1=0.81, a_2=0.458, a_3=2.26))
     sigma_ln_alpha    = get_sigma(y, s1=-0.58, s2=0.86)
     rho_ln_T_ln_alpha = get_rho(y, r1=0.705, r2=-0.023)
 
     ### Two random variables
-    z1 = torch.randn_like(y)
-    z2 = torch.randn_like(y)
+    key1, key2 = random.split(random.key(seed))
+    z1 = random.normal(key1, shape=y.shape)
+    z2 = random.normal(key2, shape=y.shape)
 
     ### Eq (11) expanded
-    ln_T_i     = mean_ln_T     + sigma_ln_T     * (torch.sqrt((1+rho_ln_T_ln_alpha).clamp(min=0))*z1 + torch.sqrt((1-rho_ln_T_ln_alpha).clamp(min=0))*z2)/2**0.5
-    ln_alpha_i = mean_ln_alpha + sigma_ln_alpha * (torch.sqrt((1+rho_ln_T_ln_alpha).clamp(min=0))*z1 - torch.sqrt((1-rho_ln_T_ln_alpha).clamp(min=0))*z2)/2**0.5
+    ln_T_i     = mean_ln_T     + sigma_ln_T     * (jnp.sqrt((1+rho_ln_T_ln_alpha).clip(min=0))*z1 + jnp.sqrt((1-rho_ln_T_ln_alpha).clip(min=0))*z2)/2**0.5
+    ln_alpha_i = mean_ln_alpha + sigma_ln_alpha * (jnp.sqrt((1+rho_ln_T_ln_alpha).clip(min=0))*z1 - jnp.sqrt((1-rho_ln_T_ln_alpha).clip(min=0))*z2)/2**0.5
 
     ### Final parameters
-    T_i = torch.exp(ln_T_i)
-    alpha_i = torch.exp(ln_alpha_i)
+    T_i = jnp.exp(ln_T_i)
+    alpha_i = jnp.exp(ln_alpha_i)
     beta_i = get_beta(alpha_i, T_i)
 
     return {
@@ -101,7 +103,7 @@ def get_longitudinal_parameters(E: torch.Tensor, Z: int):
 
 ### RADIAL ###
 
-def get_tau(t: torch.Tensor, T: torch.Tensor, 
+def get_tau(t: jax.Array, T: jax.Array, 
             alpha=None, mean_ln_alpha=None, fluctuate=True):
     if fluctuate:
         assert alpha is not None and mean_ln_alpha is not None, \
@@ -109,7 +111,7 @@ def get_tau(t: torch.Tensor, T: torch.Tensor,
         beta = get_beta(alpha, T)
         mean_t = alpha / beta
         ### Eq (34)
-        tau = (t / mean_t) * torch.exp(mean_ln_alpha) / (torch.exp(mean_ln_alpha) - 1)
+        tau = (t / mean_t) * jnp.exp(mean_ln_alpha) / (jnp.exp(mean_ln_alpha) - 1)
     else:
         tau = t / T
 
@@ -133,24 +135,21 @@ def get_R_core(tau, z_1, z_2):
 
 ### Eq (25)
 def get_R_tail(tau, k_1, k_2, k_3, k_4):
-    term1 = torch.exp(k_3 * (tau - k_2))
-    term2 = torch.exp(k_4 * (tau - k_2))
+    term1 = jnp.exp(k_3 * (tau - k_2))
+    term2 = jnp.exp(k_4 * (tau - k_2))
     return k_1 * (term1 + term2)
 
 ### Eq (26)
 def get_p(tau, p_1, p_2, p_3):
     tau_prime = (p_2 - tau) / p_3
-    p = p_1 * torch.exp(tau_prime - torch.exp(tau_prime))
-    if (p < 0).any() or (p > 1).any():
-        print("WARNING: p not in [0, 1]. Clamping...")
-        p = p.clamp(0, 1)
-    return p
+    p = p_1 * jnp.exp(tau_prime - jnp.exp(tau_prime))
+    return p.clip(0, 1)
 
 ### Putting it all together (radial)
-def get_radial_parameters(tau: torch.Tensor, E: torch.Tensor, Z: int):
+def get_radial_parameters(tau: jax.Array, E: jax.Array, Z: int):
 
     ### A.1.3
-    lnE = torch.log(E)
+    lnE = jnp.log(E)
     z_1 = 0.0251 + 0.00319*lnE
     z_2 = 0.1162 - 0.000381*Z
     k_1 = 0.659  - 0.00309*Z
@@ -170,22 +169,23 @@ def get_radial_parameters(tau: torch.Tensor, E: torch.Tensor, Z: int):
 ### RADIAL SAMPLING ###
 
 ### Eq (28)
-def sample_radii(R_core: torch.Tensor, R_tail: torch.Tensor, p: torch.Tensor, N: int):
+def sample_radii(R_core: jax.Array, R_tail: jax.Array, p: jax.Array, N: int, seed: int = 0):
     ### Expand dims to broadcast to (..., N)
     R_core = R_core[..., None]
     R_tail = R_tail[..., None]
     p      = p[..., None]
     shape  = p.shape[:-1] + (N,)
-    v = torch.rand(shape, device=R_core.device)
-    w = torch.rand(shape, device=R_core.device)
+    keyv, keyw = random.split(random.key(seed))
+    v = random.uniform(keyv, shape=shape)
+    w = random.uniform(keyw, shape=shape)
     ### Note: there appears to be a typo in the paper (they do p < w)
-    R_mixed = torch.where(w < p, R_core, R_tail)
-    return R_mixed * torch.sqrt(v / (1 - v))
+    R_mixed = jnp.where(w < p, R_core, R_tail)
+    return R_mixed * jnp.sqrt(v / (1 - v))
 
 ### Eq (31)
-def get_num_spots_total(E: torch.Tensor, Z: int):
-    N = 93 * torch.log(torch.tensor(float(Z), device=E.device)) * E ** 0.876
-    return N.long().clamp(min=1)
+def get_num_spots_total(E: jax.Array, Z: int):
+    N = 93 * jnp.log(Z) * E ** 0.876
+    return N.astype(jnp.int32).clip(min=1)
 
 ### Eq (32) and (33)
 def get_num_spots_layer(t_lo, t_hi, alpha, T, Z, N_total=None, E=None):
@@ -202,16 +202,17 @@ def get_num_spots_layer(t_lo, t_hi, alpha, T, Z, N_total=None, E=None):
     frac = longitudinal_cdf(t_hi, alpha_spot, beta_spot) \
          - longitudinal_cdf(t_lo, alpha_spot, beta_spot)
     
-    if isinstance(alpha, np.ndarray):
+    if isinstance(alpha, jax.Array):
         N_layer = N_total * frac
-        N_layer = np.clip(N_layer.astype(int), 1, None)
+        N_layer = jnp.clip(N_layer.astype(jnp.int32), 1, None)
     else:
         N_layer = max(1, int(N_total * frac))
 
     return N_layer
 
 
-def shoot(Es: torch.Tensor, Z: int, t_edges: torch.Tensor, N_spots_per_layer=None, flatten=True):
+def shoot(Es: jax.Array, Z: int, t_edges: jax.Array, 
+          seed: int = 0, N_spots_per_layer=None, flatten=True):
 
     assert len(t_edges) >= 2, "t_edges must have at least 2 edges"
 
@@ -241,17 +242,17 @@ def shoot(Es: torch.Tensor, Z: int, t_edges: torch.Tensor, N_spots_per_layer=Non
     ### Fix spots per layer to allow vectorized ops
     if N_spots_per_layer is None:
         N_total = get_num_spots_total(Es, Z)
-        N_spots_per_layer = max(1, int(N_total.float().mean().item() / N_layers))
+        N_spots_per_layer = max(1, int(N_total.astype(jnp.float32).mean() / N_layers))
         N_spots_per_layer = min(N_spots_per_layer, 100_000) # avoid OOM
 
     ### Sample radii and angles: (N_particles, N_layers, N_spots_per_layer)
-    r   = sample_radii(R_core, R_tail, p, N_spots_per_layer)
-    phi = torch.rand_like(r) * (2 * torch.pi)
+    r   = sample_radii(R_core, R_tail, p, N_spots_per_layer, seed)
+    phi = random.uniform(random.key(seed), shape=r.shape) * (2 * jnp.pi)
 
     ### Additional information
-    spot_E          = (dE / N_spots_per_layer)[:, :, None].expand_as(r)
-    t_mid_bc        = t_mid[None, :, None].expand_as(r)
-    particle_idx_bc = torch.arange(len(Es), device=Es.device, dtype=torch.long)[:, None, None].expand_as(r)
+    spot_E          = jnp.broadcast_to((dE / N_spots_per_layer)[:, :, None], r.shape)
+    t_mid_bc        = jnp.broadcast_to(t_mid[None, :, None], r.shape)
+    particle_idx_bc = jnp.broadcast_to(jnp.arange(len(Es), dtype=jnp.int32)[:, None, None], r.shape)
 
     ### Results
     out_dict = {

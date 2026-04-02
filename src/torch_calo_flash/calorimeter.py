@@ -1,11 +1,14 @@
-import torch
+from functools import partial
+
+import jax
+import jax.numpy as jnp
 from .calo_flash import shoot
 
 class CaloBlock:
 
     ### Homogeneous calorimeter block with cells on Cartesian grid
 
-    def __init__(self, config, device=None):
+    def __init__(self, config):
         self.config = config
         self.Z = config['Z']
         self.width = config['width']
@@ -18,16 +21,7 @@ class CaloBlock:
         self.N_spots_per_layer = config.get('N_spots_per_layer', 1000)
         self.cell_e_threshold = config.get('cell_e_threshold', 0.0)
 
-        self.set_device(device)
         self.initialize_cells()
-
-    def set_device(self, device):
-        if device is None:
-            self.device = self.config.get('device', 'cpu')
-        else:
-            self.device = device
-        if isinstance(self.device, str):
-            self.device = torch.device(self.device)
     
     def initialize_cells(self):
         self.cell_size_x = self.width / self.N_cells_x
@@ -35,11 +29,11 @@ class CaloBlock:
         self.cell_size_z = self.depth / self.N_cells_z
 
         # N+1 bin edges covering the full range
-        self.cell_x_edges = torch.linspace(-self.width/2, self.width/2, self.N_cells_x + 1, device=self.device)
-        self.cell_y_edges = torch.linspace(-self.height/2, self.height/2, self.N_cells_y + 1, device=self.device)
-        self.cell_z_edges = torch.linspace(0, self.depth, self.N_cells_z + 1, device=self.device)
+        self.cell_x_edges = jnp.linspace(-self.width/2, self.width/2, self.N_cells_x + 1)
+        self.cell_y_edges = jnp.linspace(-self.height/2, self.height/2, self.N_cells_y + 1)
+        self.cell_z_edges = jnp.linspace(0, self.depth, self.N_cells_z + 1)
 
-    def simulate(self, particle_Es: torch.Tensor, particle_xs: torch.Tensor, particle_ys: torch.Tensor,
+    def simulate(self, particle_Es: jax.Array, particle_xs: jax.Array, particle_ys: jax.Array,
                  return_grid=True, return_hits=True, return_truth=True, N_spots_per_layer=None):
 
         '''
@@ -51,7 +45,7 @@ class CaloBlock:
             - hits (hit)           : subset of cells that have nonzero energy deposits after thresholding
             - truth record (truth) : (src, dst, wgt) triplets connecting hits to parent particles
 
-        Batch computations are done using flattened tensors, for example:
+        Batch computations are done using flattened arrays, for example:
             - input particle properties:  (N_events * N_particles,)
             - simulated cell energies:    (N_events * N_cells,)
             - truth cell-particle record: (N_events * N_cells * N_particles,)
@@ -64,20 +58,14 @@ class CaloBlock:
             N_spots_per_layer = self.N_spots_per_layer
 
         ### Auto-unsqueeze (N_particles,) -> (1, N_particles)
-        squeezed = particle_Es.dim() == 1
+        squeezed = particle_Es.ndim == 1
         if squeezed:
-            particle_Es = particle_Es.unsqueeze(0)
-            particle_xs = particle_xs.unsqueeze(0)
-            particle_ys = particle_ys.unsqueeze(0)
+            particle_Es = particle_Es[None, :]
+            particle_xs = particle_xs[None, :]
+            particle_ys = particle_ys[None, :]
 
         ### Shapes (Note: N_particles = maximum across batch)
         N_events, N_particles = particle_Es.shape
-
-        if particle_Es.device != self.device:
-            ### Move to device
-            particle_Es = particle_Es.to(device=self.device, dtype=torch.float32)
-            particle_xs = particle_xs.to(device=self.device, dtype=torch.float32)
-            particle_ys = particle_ys.to(device=self.device, dtype=torch.float32)
 
         ### Flatten: (N_events, N_particles) -> (N_events * N_particles,)
         flat_Es = particle_Es.reshape(-1)
@@ -85,7 +73,7 @@ class CaloBlock:
         flat_ys = particle_ys.reshape(-1)
 
         ### Mask out padded (E == 'nan') particles
-        real_part_idx = torch.where(flat_Es == flat_Es)[0]
+        real_part_idx = jnp.where(flat_Es == flat_Es)[0]
 
         ### Calo Flash simulation (only valid particles)
         ### output values have shape (len(real_part_idx) * N_cells_z * N_spots_per_layer,)
@@ -98,8 +86,8 @@ class CaloBlock:
         spot_local_part_idx   = spot_global_part_idx  % N_particles
 
         ### Convert to Cartesian
-        spot_x = spot_dict['r'] * torch.cos(spot_dict['phi']) + flat_xs[spot_global_part_idx]
-        spot_y = spot_dict['r'] * torch.sin(spot_dict['phi']) + flat_ys[spot_global_part_idx]
+        spot_x = spot_dict['r'] * jnp.cos(spot_dict['phi']) + flat_xs[spot_global_part_idx]
+        spot_y = spot_dict['r'] * jnp.sin(spot_dict['phi']) + flat_ys[spot_global_part_idx]
         spot_z = spot_dict['t']
         spot_e = spot_dict['E']
 
@@ -111,9 +99,9 @@ class CaloBlock:
         spot_event_idx, spot_local_part_idx = spot_event_idx[mask], spot_local_part_idx[mask]
 
         ### Find the local cell index on (x,y,z) axes where the spot falls (floor-division on uniform grid)
-        spot_local_cell_idx_x = ((spot_x - self.cell_x_edges[0]) / self.cell_size_x).long().clamp(0, self.N_cells_x - 1)
-        spot_local_cell_idx_y = ((spot_y - self.cell_y_edges[0]) / self.cell_size_y).long().clamp(0, self.N_cells_y - 1)
-        spot_local_cell_idx_z = ((spot_z - self.cell_z_edges[0]) / self.cell_size_z).long().clamp(0, self.N_cells_z - 1)
+        spot_local_cell_idx_x = ((spot_x - self.cell_x_edges[0]) / self.cell_size_x).astype(jnp.int32).clip(0, self.N_cells_x - 1)
+        spot_local_cell_idx_y = ((spot_y - self.cell_y_edges[0]) / self.cell_size_y).astype(jnp.int32).clip(0, self.N_cells_y - 1)
+        spot_local_cell_idx_z = ((spot_z - self.cell_z_edges[0]) / self.cell_size_z).astype(jnp.int32).clip(0, self.N_cells_z - 1)
 
         ### Combine these to get a single local cell index running over all N_cells in each event
         spot_local_cell_idx = spot_local_cell_idx_x * (self.N_cells_y * self.N_cells_z) \
@@ -124,15 +112,15 @@ class CaloBlock:
         spot_global_cell_idx = spot_event_idx * self.N_cells + spot_local_cell_idx
 
         ### Aggregate energy into flat (N_events * N_cells) array
-        cell_e = torch.zeros(N_events * self.N_cells, device=self.device)
-        cell_e.scatter_add_(0, spot_global_cell_idx, spot_e)
+        cell_e = jnp.zeros(N_events * self.N_cells)
+        cell_e = cell_e.at[spot_global_cell_idx].add(spot_e)
 
         ### Add noise
         ### (TODO)
 
         ### Zero out cells below detection threshold
         if self.cell_e_threshold > 0:
-            cell_e[cell_e < self.cell_e_threshold] = 0.0
+            cell_e = cell_e.at[cell_e < self.cell_e_threshold].set(0.0)
 
         grid_dict = {}
         if return_grid:
@@ -149,18 +137,18 @@ class CaloBlock:
             return grid_dict
 
         ### Hit (active cell) global index running over (N_events * N_cells)
-        hit_global_cell_idx = torch.where(cell_e > 0)[0]
+        hit_global_cell_idx = jnp.where(cell_e > 0)[0]
 
         ### Tally hits per event
         hit_event_idx  = hit_global_cell_idx // self.N_cells
-        event_num_hits = torch.bincount(hit_event_idx, minlength=N_events)
+        event_num_hits = jnp.bincount(hit_event_idx, minlength=N_events)
         event_hit_offset = event_num_hits.cumsum(0) - event_num_hits
 
         hit_dict = {}
         if return_hits:
 
             ### Hit local index within each event
-            hit_global_idx   = torch.arange(len(hit_global_cell_idx), device=self.device)
+            hit_global_idx   = jnp.arange(len(hit_global_cell_idx))
             hit_local_idx    = hit_global_idx - event_hit_offset[hit_event_idx]
 
             ### Hit local cell index
@@ -195,9 +183,9 @@ class CaloBlock:
             spot_global_truth_idx = spot_global_cell_idx * N_particles + spot_local_part_idx
 
             ### Aggregate spots into flat (N_events * N_cells * N_particles) array of truth energy
-            truth_e = torch.zeros(N_events * self.N_cells * N_particles, device=self.device)
-            truth_e.scatter_add_(0, spot_global_truth_idx, spot_e)
-            truth_global_idx = truth_e.nonzero(as_tuple=True)[0]
+            truth_e = jnp.zeros(N_events * self.N_cells * N_particles)
+            truth_e = truth_e.at[spot_global_truth_idx].add(spot_e)
+            truth_global_idx = jnp.where(truth_e > 0)[0]
 
             ### Compute local (event, cell, particle) indices corresponding to each nonzero truth entry
             truth_event_idx       = (truth_global_idx // N_particles) // self.N_cells
@@ -206,8 +194,8 @@ class CaloBlock:
             truth_e               = truth_e[truth_global_idx]
 
             ### Compute global hit index for each cell (-1 if inactive/thresholded)
-            cell_global_hit_idx = torch.full((N_events * self.N_cells,), -1, dtype=torch.long, device=self.device)
-            cell_global_hit_idx[hit_global_cell_idx] = torch.arange(len(hit_global_cell_idx), device=self.device)
+            cell_global_hit_idx = jnp.full((N_events * self.N_cells,), -1, dtype=jnp.int32)
+            cell_global_hit_idx = cell_global_hit_idx.at[hit_global_cell_idx].set(jnp.arange(len(hit_global_cell_idx)))
 
             ### Compute global hit index for each truth entry
             truth_global_cell_idx = truth_event_idx * self.N_cells + truth_local_cell_idx
