@@ -3,8 +3,6 @@ from torch.utils.data import IterableDataset
 from .calorimeter import CaloBlock
 from .generator import EventGenerator
 from .utils import transform, get_max_N_safe
-from jax import dlpack as jdl
-from torch.utils.dlpack import from_dlpack, to_dlpack
 import yaml
 
 
@@ -80,10 +78,10 @@ class SimplePflowDataset(IterableDataset):
                                           return_truth=True)
 
             ### Convert to torch tensors
-            p_E = from_dlpack(jdl.to_dlpack(p_E))
-            p_x = from_dlpack(jdl.to_dlpack(p_x))
-            p_y = from_dlpack(jdl.to_dlpack(p_y))
-            calo_dict = {k: from_dlpack(jdl.to_dlpack(v)) for k, v in calo_dict.items()}
+            p_E = torch.from_dlpack(p_E)
+            p_x = torch.from_dlpack(p_x)
+            p_y = torch.from_dlpack(p_y)
+            calo_dict = {k: torch.from_dlpack(v) for k, v in calo_dict.items()}
 
             ### Incidence matrix
             N_hits = calo_dict['hit_idx'].max().item() + 1
