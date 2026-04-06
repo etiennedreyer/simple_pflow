@@ -13,7 +13,7 @@ transform_funcs = {
     "none_inv": lambda x, _: x
 }
 
-def transform(x, var, cfg, inverse=False):
+def transform(x, var, cfg, inverse=False, mask=None):
 
     if var not in cfg:
         raise ValueError(f"Variable {var} not configured")
@@ -26,8 +26,12 @@ def transform(x, var, cfg, inverse=False):
     key = cfg[var]["type"]
     if inverse:
         key += "_inv"
+    
+    out = transform_funcs[key](x, cfg[var])
+    if mask is not None:
+        out = torch.where(mask, float('nan'), out)
 
-    return transform_funcs[key](x, cfg[var])
+    return out
 
 def get_max_N_safe(indices, N_max=None):
 

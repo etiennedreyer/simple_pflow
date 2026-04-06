@@ -148,15 +148,13 @@ class CaloBlock:
         hit_global_cell_idx = jnp.arange(len(cell_e))
         hit_event_idx = hit_global_cell_idx // self.N_cells
 
-        ### Tally hits per event
-        event_num_hits = hit_valid.reshape(N_events, self.N_cells).sum(axis=1)
-        event_hit_offset = event_num_hits.cumsum() - event_num_hits
+        ### Compute local hit index within each event
+        hit_valid_2d = hit_valid.reshape(N_events, self.N_cells)
+        hit_local_idx_2d = jnp.cumsum(hit_valid_2d, axis=1) - 1
+        hit_local_idx = jnp.where(hit_valid, hit_local_idx_2d.flatten(), -1)
 
         hit_dict = {}
         if return_hits:
-
-            ### Hit local index within each event
-            hit_local_idx = jnp.arange(len(cell_e)) - event_hit_offset[hit_event_idx]
 
             ### Hit local cell index
             hit_local_cell_idx = hit_global_cell_idx % self.N_cells
@@ -174,7 +172,7 @@ class CaloBlock:
 
             hit_dict = {
                 'hit_event_idx': jnp.where(hit_valid, hit_event_idx, -1),
-                'hit_idx':       jnp.where(hit_valid, hit_local_idx, -1),
+                'hit_idx':       hit_local_idx, # already -1 for invalid hits
                 'hit_cell_idx':  jnp.where(hit_valid, hit_local_cell_idx, -1),
                 'hit_x':         jnp.where(hit_valid, hit_x, -1),
                 'hit_y':         jnp.where(hit_valid, hit_y, -1),
@@ -208,16 +206,13 @@ class CaloBlock:
             cell_global_hit_idx = jnp.full((N_events * self.N_cells,), -1, dtype=jnp.int32)
             cell_global_hit_idx = cell_global_hit_idx.at[hit_global_cell_idx].set(jnp.arange(len(hit_global_cell_idx)))
 
-            ### Compute global hit index for each truth entry
+            ### Lookup local hit index for each truth entry
             truth_global_cell_idx = truth_event_idx * self.N_cells + truth_local_cell_idx
-            truth_global_hit_idx = cell_global_hit_idx[truth_global_cell_idx]
-
-            ### Compute local hit index for each truth entry by subtracting offsets
-            truth_local_hit_idx = truth_global_hit_idx - event_hit_offset[truth_event_idx]
+            truth_local_hit_idx = hit_local_idx[truth_global_cell_idx]
 
             if self.cell_e_threshold > 0:
                 ### Drop entries if E>0 but hit failed threshold
-                truth_valid = truth_valid & (truth_global_hit_idx >= 0)
+                truth_valid = truth_valid & (truth_local_hit_idx >= 0)
 
             truth_dict = {
                 'truth_event_idx':    jnp.where(truth_valid, truth_event_idx, -1),
