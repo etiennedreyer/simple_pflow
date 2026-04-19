@@ -1,0 +1,14 @@
+calorimeter:
+  Z: 82                   # Atomic number (lead)
+  geometry:
+    x:
+      size: 10.0           # Transverse width [X0]
+      N_cells: 32           # Transverse cells in x
+    y:
+      size: 10.0           # Transverse height [X0]
+      N_cells: 32           # Transverse cells in y
+    z:
+      size: 16.0           # Longitudinal depth [X0]
+      N_cells: 8            # Longitudinal layers
+  N_spots_per_layer: 1000 # Number spots to sample
+  cell_e_threshold: 25.0  # Cell energy threshold [MeV]
