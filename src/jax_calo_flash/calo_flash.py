@@ -1,7 +1,6 @@
 import jax
 import jax.numpy as jnp
 from jax import random
-import numpy as np
 from functools import partial
 
 ### Python implementation of https://arxiv.org/pdf/hep-ex/0001020
