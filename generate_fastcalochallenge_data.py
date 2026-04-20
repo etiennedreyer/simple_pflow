@@ -25,7 +25,7 @@ def reshape_data_for_calochallenge(calo_dict):
 
     incident_energies = calo_dict["particle_e"]
     showers = calo_dict["cell_e"]
-    showers = jnp.permute_dims(showers, (0, 3, 2, 1))  # (N_events, N_z, N_r, N_phi)
+    showers = jnp.permute_dims(showers, (0, 3, 2, 1))  # (N_events, N_z, N_phi, N_r)
     showers = jnp.reshape(showers, (showers.shape[0], -1))  # (N_events, N_cells)
 
     return incident_energies, showers
@@ -60,6 +60,7 @@ def main():
 
     for i in tqdm(range(0, len(incident_energies), args.batch_size)):
         batch_energies = incident_energies[i:i+args.batch_size]
+        calo.set_seed(i)
         batch_dict = calo.simulate(batch_energies, return_hits=False, return_truth=False)
         batch_incident_energies, batch_showers = reshape_data_for_calochallenge(batch_dict)
         out_file["incident_energies"][i:i+args.batch_size] = batch_incident_energies

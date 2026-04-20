@@ -4,11 +4,11 @@ N_spots_per_layer: 1024
 
 geometry:
   r:
-      size: 11.9
+      size: 4.490
       N_cells: 9
   phi:
       size: 6.2831853072
       N_cells: 16
   z:
-      size: 43.7
+      size: 43.664
       N_cells: 45
