@@ -5,6 +5,7 @@ import jax
 import jax.numpy as jnp
 from .calo_flash import shoot
 from functools import partial
+from typing import Union, Tuple
 
 class CaloBase:
 
@@ -31,15 +32,35 @@ class CaloBase:
     def set_seed(self, seed):
         self.seed = seed
 
-    def _spots_to_local_cell_idx(self, spots: dict, particle_xs: jax.Array, particle_ys: jax.Array) -> jax.Array:
-        pass
+    def _spots_to_local_cell_idx(self, spot_dict: dict, 
+                                 particle_xs: Union [jax.Array, None] = None,
+                                 particle_ys: Union [jax.Array, None] = None
+                                 ) -> jax.Array:
 
-    def _local_cell_idx_to_coords(self, local_cell_idx: jax.Array) -> list:
+        ### Find the local cell index on (var0,var1,z) axes where the spot falls (floor-division on uniform grid)
+        vars = self.coords[:2]
+        spot_local_cell_idx_var0 = ((spot_dict[vars[0]] - self.cell_edges[0][0]) / self.cell_sizes[0]).astype(jnp.int32).clip(0, self.N_cells[0] - 1)
+        spot_local_cell_idx_var1 = ((spot_dict[vars[1]] - self.cell_edges[1][0]) / self.cell_sizes[1]).astype(jnp.int32).clip(0, self.N_cells[1] - 1)
+        spot_local_cell_idx_z    = ((spot_dict['z']     - self.cell_edges[2][0]) / self.cell_sizes[2]).astype(jnp.int32).clip(0, self.N_cells[2] - 1)
+
+        ### Combine these to get a single local cell index running over all N_cells in each event
+        spot_local_cell_idx = spot_local_cell_idx_var0 * (self.N_cells[1] * self.N_cells[2]) \
+                            + spot_local_cell_idx_var1 *  self.N_cells[2] \
+                            + spot_local_cell_idx_z
+
+        spot_local_cell_idx = jnp.where(spot_dict['contained'], spot_local_cell_idx, -1)
+
+        return spot_local_cell_idx
+
+
+    def _local_cell_idx_to_coords(self, local_cell_idx: jax.Array) -> tuple:
         pass
 
     @partial(jax.jit, static_argnames=['self', 'return_grid', 'return_hits', 'return_truth', 'N_spots_per_layer'])
-    def simulate(self, particle_Es: jax.Array, particle_xs: jax.Array, particle_ys: jax.Array,
-                 return_grid=True, return_hits=True, return_truth=True, N_spots_per_layer=None):
+    def simulate(self, particle_Es: jax.Array, 
+                 particle_xs: jax.Array = None, particle_ys: jax.Array = None,
+                 return_grid=True, return_hits=True, return_truth=True, 
+                 N_spots_per_layer=None):
 
         '''
         Six separate sets are involved, each with a different number of elements:
@@ -193,37 +214,34 @@ class CaloBlock(CaloBase):
 
     def __init__(self, config):
         super().__init__(config)
+        assert self.coords == ['x', 'y', 'z'], "CaloBlock expects geometry {x:..., y:..., z:...}"
 
-        # N+1 bin edges covering the full range
         self.cell_edges[0] = jnp.linspace(-self.size[0]/2, self.size[0]/2, self.N_cells[0] + 1)
         self.cell_edges[1] = jnp.linspace(-self.size[1]/2, self.size[1]/2, self.N_cells[1] + 1)
 
-    def _spots_to_local_cell_idx(self, spot_dict, particle_xs, particle_ys):
+    def _spots_to_local_cell_idx(self, spot_dict, particle_xs=None, particle_ys=None):
 
-        flat_xs = particle_xs.reshape(-1)
-        flat_ys = particle_ys.reshape(-1)
+        if particle_xs is None:
+            flat_xs = jnp.zeros_like(spot_dict['r'])
+        else:
+            flat_xs = particle_xs.reshape(-1)
+
+        if particle_ys is None:
+            flat_ys = jnp.zeros_like(spot_dict['r'])
+        else:
+            flat_ys = particle_ys.reshape(-1)
 
         ### Convert to Cartesian, adding per-particle offsets
-        spot_x = spot_dict['r'] * jnp.cos(spot_dict['phi']) + flat_xs[spot_dict['particle_idx']]
-        spot_y = spot_dict['r'] * jnp.sin(spot_dict['phi']) + flat_ys[spot_dict['particle_idx']]
-        spot_z = spot_dict['t']
-
-        ### Find the local cell index on (x,y,z) axes where the spot falls (floor-division on uniform grid)
-        spot_local_cell_idx_x = ((spot_x - self.cell_edges[0][0]) / self.cell_sizes[0]).astype(jnp.int32).clip(0, self.N_cells[0] - 1)
-        spot_local_cell_idx_y = ((spot_y - self.cell_edges[1][0]) / self.cell_sizes[1]).astype(jnp.int32).clip(0, self.N_cells[1] - 1)
-        spot_local_cell_idx_z = ((spot_z - self.cell_edges[2][0]) / self.cell_sizes[2]).astype(jnp.int32).clip(0, self.N_cells[2] - 1)
-
-        ### Combine these to get a single local cell index running over all N_cells in each event
-        spot_local_cell_idx = spot_local_cell_idx_x * (self.N_cells[1] * self.N_cells[2]) \
-                            + spot_local_cell_idx_y * self.N_cells[2] \
-                            + spot_local_cell_idx_z
+        spot_dict['x'] = spot_dict['r'] * jnp.cos(spot_dict['phi']) + flat_xs[spot_dict['particle_idx']]
+        spot_dict['y'] = spot_dict['r'] * jnp.sin(spot_dict['phi']) + flat_ys[spot_dict['particle_idx']]
+        spot_dict['z'] = spot_dict['t']
 
         ### Flag spots outside geometry as invalid with -1 index
-        spot_contained = (spot_x >= -self.size[0]/2) & (spot_x < self.size[0]/2) & \
-                         (spot_y >= -self.size[1]/2) & (spot_y < self.size[1]/2) & \
-                         (spot_z >= 0)               & (spot_z < self.size[2])
+        spot_dict['contained'] = (spot_dict['x'] >= -self.size[0]/2) & (spot_dict['x'] < self.size[0]/2) & \
+                                 (spot_dict['y'] >= -self.size[1]/2) & (spot_dict['y'] < self.size[1]/2) & \
+                                 (spot_dict['z'] >= 0)               & (spot_dict['z'] < self.size[2])
 
-        spot_local_cell_idx = jnp.where(spot_contained, spot_local_cell_idx, -1)
+        spot_local_cell_idx = super()._spots_to_local_cell_idx(spot_dict, particle_xs=None, particle_ys=None)
 
         return spot_local_cell_idx
     
@@ -240,3 +258,46 @@ class CaloBlock(CaloBase):
         z = self.cell_edges[2][0] + (local_cell_idx_z + 0.5) * self.cell_sizes[2]
 
         return x, y, z
+    
+
+class CaloCylinder(CaloBase):
+
+    ### Cells on cylindrical grid
+
+    def __init__(self, config):
+        super().__init__(config)
+        assert self.coords == ['r', 'phi', 'z'], "CaloCylinder expects geometry {r:..., phi:..., z:...}"
+        self.size[1] = 2 * jnp.pi
+
+        ### Only uniform binning supported for now
+        self.cell_edges[0] = jnp.linspace(0, self.size[0], self.N_cells[0] + 1)
+        self.cell_edges[1] = jnp.linspace(0, self.size[1], self.N_cells[1] + 1)
+
+    def _spots_to_local_cell_idx(self, spot_dict, particle_xs=None, particle_ys=None):
+
+        assert particle_xs is None and particle_ys is None, "CaloCylinder does not support per-particle offsets"
+
+        spot_dict['z'] = spot_dict['t']
+
+        ### Flag spots outside geometry as invalid with -1 index
+        spot_dict['contained'] = (spot_dict['r']   >= 0) & (spot_dict['r']   < self.size[0]) & \
+                                 (spot_dict['phi'] >= 0) & (spot_dict['phi'] < self.size[1]) & \
+                                 (spot_dict['z']   >= 0) & (spot_dict['z']   < self.size[2])
+        
+        spot_local_cell_idx = super()._spots_to_local_cell_idx(spot_dict, particle_xs=None, particle_ys=None)
+
+        return spot_local_cell_idx
+
+    def _local_cell_idx_to_coords(self, local_cell_idx: jax.Array) -> tuple:
+
+        ### Convert local cell index -> local cell index on (r,phi,z) axes
+        local_cell_idx_r   =  local_cell_idx // (self.N_cells[1] * self.N_cells[2])
+        local_cell_idx_phi = (local_cell_idx  % (self.N_cells[1] * self.N_cells[2])) // self.N_cells[2]
+        local_cell_idx_z   =  local_cell_idx  %  self.N_cells[2]
+
+        ### Compute corresponding cell centers
+        r   = self.cell_edges[0][0] + (local_cell_idx_r   + 0.5) * self.cell_sizes[0]
+        phi = self.cell_edges[1][0] + (local_cell_idx_phi + 0.5) * self.cell_sizes[1]
+        z   = self.cell_edges[2][0] + (local_cell_idx_z   + 0.5) * self.cell_sizes[2]
+
+        return r, phi, z
