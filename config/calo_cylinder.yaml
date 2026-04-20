@@ -1,0 +1,14 @@
+Z: 74          # Atomic number
+cell_e_threshold: 0.01515 # MeV (15.15 keV)
+N_spots_per_layer: 1024
+
+geometry:
+  r:
+      size: 11.9
+      N_cells: 9
+  phi:
+      size: 6.2831853072
+      N_cells: 16
+  z:
+      size: 43.7
+      N_cells: 45

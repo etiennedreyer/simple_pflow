@@ -1,5 +1,6 @@
 from functools import partial
 from math import prod
+import yaml
 
 import jax
 import jax.numpy as jnp
@@ -11,7 +12,10 @@ class CaloBase:
 
     ### Homogeneous calorimeter simulation with no geometry specified for now
 
-    def __init__(self, config):
+    def __init__(self, config: Union [str, dict]):
+        if isinstance(config, str):
+            with open(config, "r") as f:
+                config = yaml.safe_load(f)
         self.config = config
         self.Z = config['Z']
         self.N_spots_per_layer = config.get('N_spots_per_layer', 1000)
@@ -86,6 +90,13 @@ class CaloBase:
         ### Shapes (Note: N_particles = maximum across batch)
         N_events, N_particles = particle_Es.shape
 
+        ### Particle info dict
+        particle_dict = {'particle_e': particle_Es}
+        if particle_xs is not None:
+            particle_dict['particle_x'] = particle_xs
+        if particle_ys is not None:
+            particle_dict['particle_y'] = particle_ys
+
         ### Flatten: (N_events, N_particles) -> (N_events * N_particles,)
         flat_Es = particle_Es.reshape(-1)
 
@@ -128,7 +139,7 @@ class CaloBase:
 
         ### Fast return
         if not return_hits and not return_truth:
-            return grid_dict
+            return {**particle_dict, **grid_dict}
 
         ### Hits = active cells
         hit_valid = cell_e > 0
@@ -203,7 +214,8 @@ class CaloBase:
                 'truth_valid':        truth_valid
             }
 
-        return {**grid_dict, 
+        return {**particle_dict,
+                **grid_dict, 
                 **hit_dict, 
                 **truth_dict}
 
