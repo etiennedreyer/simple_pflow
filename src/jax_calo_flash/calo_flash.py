@@ -9,7 +9,8 @@ atomic_number = {
     'lead': 82,
     'iron': 26,
     'copper': 29,
-    'aluminum': 13
+    'aluminum': 13,
+    'tungsten': 74
 }
 
 ### From https://pdg.lbl.gov/2025/AtomicNuclearProperties/expert.html
@@ -17,7 +18,8 @@ critical_energy = {
     82: 7.43,
     26: 21.0,
     29: 19.0,
-    13: 28.0
+    13: 28.0,
+    74: 7.97
 }
 
 ### LONGITUDINAL ###
@@ -47,7 +49,10 @@ def get_alpha(y, Z,
     return a_1 + (a_2 + a_3/Z) * jnp.log(y)
 
 ### Putting it all together (longitudinal)
-def get_longitudinal_parameters(E: jax.Array, Z: int, seed: int = 0):
+def get_longitudinal_parameters(E: jax.Array, Z: int, key=None):
+
+    if key is None:
+        key = random.key(0)
 
     y = E / critical_energy[Z]
 
@@ -72,7 +77,7 @@ def get_longitudinal_parameters(E: jax.Array, Z: int, seed: int = 0):
     rho_ln_T_ln_alpha = get_rho(y, r1=0.705, r2=-0.023)
 
     ### Two random variables
-    key1, key2 = random.split(random.key(seed))
+    key1, key2 = random.split(key)
     z1 = random.normal(key1, shape=y.shape)
     z2 = random.normal(key2, shape=y.shape)
 
@@ -168,13 +173,15 @@ def get_radial_parameters(tau: jax.Array, E: jax.Array, Z: int):
 ### RADIAL SAMPLING ###
 
 ### Eq (28)
-def sample_radii(R_core: jax.Array, R_tail: jax.Array, p: jax.Array, N: int, seed: int = 0):
+def sample_radii(R_core: jax.Array, R_tail: jax.Array, p: jax.Array, N: int, key=None):
+    if key is None:
+        key = random.key(0)
     ### Expand dims to broadcast to (..., N)
     R_core = R_core[..., None]
     R_tail = R_tail[..., None]
     p      = p[..., None]
     shape  = p.shape[:-1] + (N,)
-    keyv, keyw = random.split(random.key(seed))
+    keyv, keyw = random.split(key)
     v = random.uniform(keyv, shape=shape)
     w = random.uniform(keyw, shape=shape)
     ### Note: there appears to be a typo in the paper (they do p < w)
@@ -227,8 +234,11 @@ def shoot(Es: jax.Array, Z: int, t_edges: jax.Array,
     E_low = 10.0
     Es = jnp.where(E_mask, E_low, Es)
 
+    ### Split root key into three independent subkeys
+    key_long, key_r, key_phi = random.split(random.key(seed), 3)
+
     ### Longitudinal parameters: each (N_particles,)
-    long_params = get_longitudinal_parameters(Es, Z)
+    long_params = get_longitudinal_parameters(Es, Z, key=key_long)
 
     t_lo  = t_edges[:-1]       # (N_layers,)
     t_hi  = t_edges[1:]
@@ -255,8 +265,8 @@ def shoot(Es: jax.Array, Z: int, t_edges: jax.Array,
         N_spots_per_layer = min(N_spots_per_layer, 100_000) # avoid OOM
 
     ### Sample radii and angles: (N_particles, N_layers, N_spots_per_layer)
-    r   = sample_radii(R_core, R_tail, p, N_spots_per_layer, seed)
-    phi = random.uniform(random.key(seed), shape=r.shape) * (2 * jnp.pi)
+    r   = sample_radii(R_core, R_tail, p, N_spots_per_layer, key=key_r)
+    phi = random.uniform(key_phi, shape=r.shape) * (2 * jnp.pi)
 
     ### Additional information
     spot_E          = jnp.broadcast_to((dE / N_spots_per_layer)[:, :, None], r.shape)
