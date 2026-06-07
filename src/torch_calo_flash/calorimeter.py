@@ -40,7 +40,8 @@ class CaloBlock:
         self.cell_z_edges = torch.linspace(0, self.depth, self.N_cells_z + 1, device=self.device)
 
     def simulate(self, particle_Es: torch.Tensor, particle_xs: torch.Tensor, particle_ys: torch.Tensor,
-                 return_grid=True, return_hits=True, return_truth=True, N_spots_per_layer=None):
+                 return_grid=True, return_hits=True, return_truth=True, N_spots_per_layer=None,
+                 long_params=None):
 
         '''
         Six separate sets are involved, each with a different number of elements:
@@ -89,8 +90,9 @@ class CaloBlock:
 
         ### Calo Flash simulation (only valid particles)
         ### output values have shape (len(real_part_idx) * N_cells_z * N_spots_per_layer,)
-        spot_dict = shoot(flat_Es[real_part_idx], self.Z, 
-                      self.cell_z_edges, N_spots_per_layer=N_spots_per_layer)
+        spot_dict = shoot(flat_Es[real_part_idx], self.Z,
+                      self.cell_z_edges, N_spots_per_layer=N_spots_per_layer,
+                      long_params=long_params)
 
         ### Map particle idx on real particles back to global particle idx
         spot_global_part_idx  = real_part_idx[spot_dict['particle_idx']]

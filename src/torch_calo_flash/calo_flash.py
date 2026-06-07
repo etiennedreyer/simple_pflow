@@ -211,14 +211,17 @@ def get_num_spots_layer(t_lo, t_hi, alpha, T, Z, N_total=None, E=None):
     return N_layer
 
 
-def shoot(Es: torch.Tensor, Z: int, t_edges: torch.Tensor, N_spots_per_layer=None, flatten=True):
+def shoot(Es: torch.Tensor, Z: int, t_edges: torch.Tensor, N_spots_per_layer=None, flatten=True,
+          long_params=None):
 
     assert len(t_edges) >= 2, "t_edges must have at least 2 edges"
 
     N_layers = len(t_edges) - 1
 
     ### Longitudinal parameters: each (N_particles,)
-    long_params = get_longitudinal_parameters(Es, Z)
+    ### Note: the kwarg enables reusing the output from a previous get_longitudinal_parameters call
+    if long_params is None:
+        long_params = get_longitudinal_parameters(Es, Z)
 
     t_lo  = t_edges[:-1]       # (N_layers,)
     t_hi  = t_edges[1:]
