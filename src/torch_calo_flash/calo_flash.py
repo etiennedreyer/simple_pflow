@@ -213,17 +213,13 @@ def get_num_spots_layer(t_lo, t_hi, alpha, T, Z, N_total=None, E=None):
 
 def shoot(Es: torch.Tensor, Z: int, t_edges: torch.Tensor, N_spots_per_layer=None, flatten=True,
           long_params=None):
-    """If long_params is provided (a dict from a previous get_longitudinal_parameters call),
-    skip the α/T draw and reuse the supplied values. Lets the caller hold shower SHAPE
-    constant across multiple `shoot` invocations while re-rolling spot positions only —
-    useful for ablations that want to isolate Monte Carlo sampling variance from the
-    intrinsic shower-shape variance."""
 
     assert len(t_edges) >= 2, "t_edges must have at least 2 edges"
 
     N_layers = len(t_edges) - 1
 
     ### Longitudinal parameters: each (N_particles,)
+    ### Note: the kwarg enables reusing the output from a previous get_longitudinal_parameters call
     if long_params is None:
         long_params = get_longitudinal_parameters(Es, Z)
 
