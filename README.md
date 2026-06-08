@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/1188512931.svg)](https://doi.org/10.5281/zenodo.20588829)
+
 ## PyCaloFlash
 
 A pythonic, GPU-accelerated implementation of the CaloFlash fast EM calorimeter shower model from [Grindhammer & Peters (2000)](https://arxiv.org/abs/hep-ex/0001020v1).
