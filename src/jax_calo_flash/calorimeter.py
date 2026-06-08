@@ -8,6 +8,65 @@ from .calo_flash import shoot
 from functools import partial
 from typing import Union, Tuple
 
+
+### Appendix A.2.1 — effective material / geometry parameters
+### Es appears in the Moliere-radius formula.
+_Es_MeV = 21.2
+
+
+def _material_critical_energy(Z, A, X0_mass_thickness_g_per_cm2):
+    '''Eq (5): E_c = 2.66 * (X0 * Z / A)^1.1, with X0 in g/cm^2.'''
+    return 2.66 * (X0_mass_thickness_g_per_cm2 * Z / A) ** 1.1
+
+
+def _compute_sampling_params(sampling_cfg: dict) -> dict:
+    '''
+    Given per-material properties for the active and passive layers,
+    compute the effective quantities from A.2.1 and the scalars
+    (F_S, e_hat, c, Z_eff, E_c_eff) consumed by calo_flash.shoot.
+
+    Each of sampling_cfg['active'] and ['passive'] must provide:
+        Z, A, X0, density, thickness
+    and may optionally provide E_c (else derived via Eq (5)).
+    sampling_cfg must also provide 'c' (sampling-fluctuation constant).
+    '''
+    act = sampling_cfg['active']
+    pas = sampling_cfg['passive']
+
+    def E_c_of(m):
+        if 'E_c' in m:
+            return float(m['E_c'])
+        ### Eq (5) requires X0 in g/cm^2 — use (density * X0_length)
+        return _material_critical_energy(m['Z'], m['A'], m['density'] * m['X0'])
+
+    Ec_a, Ec_p = E_c_of(act), E_c_of(pas)
+    rho_a, rho_p = act['density'],  pas['density']
+    d_a,   d_p   = act['thickness'], pas['thickness']
+    X0_a,  X0_p  = act['X0'],        pas['X0']
+    Z_a,   Z_p   = act['Z'],         pas['Z']
+
+    w_a = rho_a * d_a / (rho_a * d_a + rho_p * d_p)
+    w_p = 1.0 - w_a
+
+    Z_eff  = w_a * Z_a + w_p * Z_p
+    X0_eff = 1.0 / (w_a / X0_a + w_p / X0_p)
+    s      = w_a * Ec_a / X0_a + w_p * Ec_p / X0_p  # auxiliary sum
+    Ec_eff = X0_eff * s
+    RM_eff = _Es_MeV / s
+
+    F_S   = X0_eff / (d_a + d_p)
+    e_hat = 1.0 / (1.0 + 0.007 * (Z_p - Z_a))
+
+    return {
+        'F_S':    float(F_S),
+        'e_hat':  float(e_hat),
+        'c':      float(sampling_cfg['c']),
+        'Z_eff':  float(Z_eff),
+        'E_c':    float(Ec_eff),
+        'X0_eff': float(X0_eff),
+        'RM_eff': float(RM_eff),
+    }
+
 class CaloBase:
 
     ### Homogeneous calorimeter simulation with no geometry specified for now
@@ -17,7 +76,29 @@ class CaloBase:
             with open(config, "r") as f:
                 config = yaml.safe_load(f)
         self.config = config
-        self.Z = config['Z']
+
+        ### Optional sampling-calorimeter configuration (Appendix A.2).
+        ### If provided, Z_eff and E_c_eff are derived from the active/passive
+        ### material properties via A.2.1 and override the top-level Z.
+        sampling_cfg = config.get('sampling')
+        if sampling_cfg is None:
+            self.Z = config['Z']
+            self.E_c = None
+            self.F_S = None
+            self.e_hat = None
+            self.c = None
+            self.X0_eff = None
+            self.RM_eff = None
+        else:
+            sp = _compute_sampling_params(sampling_cfg)
+            self.Z       = sp['Z_eff']
+            self.E_c     = sp['E_c']
+            self.F_S     = sp['F_S']
+            self.e_hat   = sp['e_hat']
+            self.c       = sp['c']
+            self.X0_eff  = sp['X0_eff']
+            self.RM_eff  = sp['RM_eff']
+
         self.N_spots_per_layer = config.get('N_spots_per_layer', 1000)
         self.cell_e_threshold = config.get('cell_e_threshold', 0.0)
         self.seed = config.get('seed', 0)
@@ -102,8 +183,9 @@ class CaloBase:
 
         ### Calo Flash simulation
         ### output values have shape (N_particles * N_cells_z * N_spots_per_layer,)
-        spot_dict = shoot(flat_Es, self.Z, self.cell_edges[2], 
-                          seed=self.seed, N_spots_per_layer=N_spots_per_layer)
+        spot_dict = shoot(flat_Es, self.Z, self.cell_edges[2],
+                          seed=self.seed, N_spots_per_layer=N_spots_per_layer,
+                          F_S=self.F_S, e_hat=self.e_hat, c=self.c, E_c=self.E_c)
 
         ### lookup local cell index (geometry-dependent) and flag invalid spots
         spot_local_cell_idx = self._spots_to_local_cell_idx(spot_dict, particle_xs, particle_ys)

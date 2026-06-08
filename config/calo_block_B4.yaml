@@ -1,0 +1,33 @@
+# Apples-to-apples match to the Geant4 B4c example
+# (/storage/agrp/dreyet/FastCaloSim/Geant4/B4/B4c).
+#
+# NOTE: despite the filename, the B4c DetectorConstruction is a HOMOGENEOUS
+# lead block (G4_Pb, a single G4Box — no active/passive layers). There is no
+# sampling structure to parameterize, so this config uses the homogeneous
+# (A.1) path: top-level `Z`, no `sampling:` block.
+#
+# Physical geometry in B4c/src/DetectorConstruction.cc:
+#   sensitive region : 10 x 10 x 20 cm
+#   voxel grid       : 128 x 128 x 64
+#   material         : lead  (X0 = 0.5612 cm,  R_M = 1.602 cm)
+#
+# `shoot()` returns z in X0 and r in Moliere radii, so sizes below are in
+# those natural units (cm-equivalents shown in comments):
+#   10 cm  / 1.602 cm per R_M =  6.242 R_M     (x, y)
+#   20 cm  / 0.5612 cm per X0 = 35.638 X0      (z)
+
+Z: 82                   # lead
+
+geometry:
+  x:
+    size: 6.242          # [R_M]  = 10 cm
+    N_cells: 128
+  y:
+    size: 6.242          # [R_M]  = 10 cm
+    N_cells: 128
+  z:
+    size: 35.638         # [X0]   = 20 cm
+    N_cells: 64
+
+N_spots_per_layer: 1024
+cell_e_threshold: 0.0    # MeV — B4c data is raw G4 hits, no noise cut applied

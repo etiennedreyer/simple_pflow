@@ -1,0 +1,43 @@
+# Sampling calorimeter example: Pb absorber + liquid-argon active medium.
+# Roughly modeled on the H1 IFE module from hep-ex/0001020. All lengths in cm.
+#
+# Omit the `sampling:` block to fall back to the homogeneous parameterization.
+# When `sampling:` is present, Z_eff and E_c_eff are derived from the material
+# properties below and override any top-level `Z`.
+
+geometry:
+  x:
+    size: 6.0            # transverse width  [cm]
+    N_cells: 32
+  y:
+    size: 6.0            # transverse height [cm]
+    N_cells: 32
+  z:
+    size: 18.0           # longitudinal depth [cm]  (~30 X0_eff)
+    N_cells: 24
+
+N_spots_per_layer: 1000
+cell_e_threshold: 25.0   # MeV
+
+sampling:
+  # Active layer: liquid argon
+  active:
+    Z: 18
+    A: 40
+    X0: 14.0             # radiation length [cm]
+    density: 1.396       # g/cm^3
+    thickness: 0.3       # cm
+    E_c: 31.9            # MeV  (optional; omit to derive via Eq (5))
+
+  # Passive layer: lead
+  passive:
+    Z: 82
+    A: 207
+    X0: 0.56
+    density: 11.35
+    thickness: 0.5
+    E_c: 7.43
+
+  # Sampling-fluctuation constant from sigma/E = c/sqrt(E).
+  # Only used to set the total number of spots (Eq 38).
+  c: 0.11
